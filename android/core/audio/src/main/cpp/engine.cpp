@@ -2,6 +2,7 @@
 
 #include <android/log.h>
 #include <arpa/inet.h>
+#include <cerrno>
 #include <cmath>
 #include <cstring>
 #include <netdb.h>
@@ -154,6 +155,7 @@ void Engine::senderLoop() {
     sockaddr_in addr{};
     bool haveAddr = false;
     int64_t lastTry = 0;
+    int64_t lastLog = 0;
 
     uint32_t seq = 0;
     uint64_t consumed = 0;  // samples consumed from ring == sample_index of next frame
@@ -221,12 +223,23 @@ void Engine::senderLoop() {
             m.flags = (muted ? kFlagMuted : 0) | (charging_.load() ? kFlagCharging : 0);
             encodeAudio(pkt, m, cur, prev);
             consumed += kFrameSamples;
-            if (fd >= 0 && send(fd, pkt, sizeof(pkt), MSG_DONTWAIT) == static_cast<ssize_t>(sizeof(pkt)))
-                packetsSent_.fetch_add(1, std::memory_order_relaxed);
+            if (fd >= 0) {
+                if (send(fd, pkt, sizeof(pkt), MSG_DONTWAIT) == static_cast<ssize_t>(sizeof(pkt)))
+                    packetsSent_.fetch_add(1, std::memory_order_relaxed);
+                else
+                    lastErrno_.store(errno, std::memory_order_relaxed);
+            }
             sentAny = true;
         }
         if (fd >= 0) pollControl(fd);
         (void)sentAny;
+        if (t - lastLog > 3000000000LL) {
+            lastLog = t;
+            LOGI("sender: errno=%d fd=%d consumed=%llu written=%llu sent=%llu overruns=%llu reopen=%d", lastErrno_.load(), fd,
+                 (unsigned long long)consumed, (unsigned long long)framesWritten_.load(),
+                 (unsigned long long)packetsSent_.load(), (unsigned long long)overruns_.load(),
+                 (int)needReopen_.load());
+        }
         usleep(1000);
     }
     if (fd >= 0) close(fd);

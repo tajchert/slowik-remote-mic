@@ -2,6 +2,7 @@ package pl.tajchert.slowik
 
 import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -74,6 +75,7 @@ class MainActivity : ComponentActivity() {
                         onGoLive = {
                             val perms = buildList {
                                 add(Manifest.permission.RECORD_AUDIO)
+                                if (Build.VERSION.SDK_INT >= 37) add("android.permission.ACCESS_LOCAL_NETWORK")
                                 if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
                             }
                             permLauncher.launch(perms.toTypedArray())
@@ -92,6 +94,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        if (Build.VERSION.SDK_INT >= 37 && checkSelfPermission("android.permission.ACCESS_LOCAL_NETWORK") != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf("android.permission.ACCESS_LOCAL_NETWORK"), 2)
+        }
         vm.startDiscovery()
     }
 

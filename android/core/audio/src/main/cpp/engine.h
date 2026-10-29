@@ -71,6 +71,7 @@ private:
     std::atomic<uint64_t> overruns_{0};
 
     std::atomic<uint64_t> packetsSent_{0};
+    std::atomic<int> lastErrno_{0};
     std::atomic<int64_t> lastControlNs_{0};
     std::atomic<int> live_{0}, opMute_{0}, loss_{0}, latency_{0}, jb_{0};
 };
