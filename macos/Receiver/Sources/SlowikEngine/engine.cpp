@@ -398,7 +398,9 @@ private:
         ratio_ = 1.0 + r;
         // Reported drift: smoothed ratio minus the deliberate target-shrink feed-forward (not during catch-up,
         // where the ratio is dominated by the deliberate fill correction).
-        if (!catchup) drift_s_ += ((r - ff_) - drift_s_) * std::min(1.0, dt / 10.0);
+        // Held during large-error transients (target steps, post-stall) so they do not read as drift.
+        if (!catchup && std::fabs(e) < 0.002)
+            drift_s_ += ((r - ff_) - drift_s_) * std::min(1.0, dt / 3.0);
     }
 
     void update_target() {
@@ -541,7 +543,10 @@ private:
 struct Stream {
     // network-thread owned
     bool have_seq = false;
-    uint32_t last_seq = 0;
+    uint32_t last_seq = 0;     // highest seq seen (wrap-aware)
+    int64_t ext_highest = 0;   // extended (unwrapped) highest seq relative to base
+    uint64_t since_base = 0;   // packets received since base
+    uint64_t lost_run = 0, lost_total_prev = 0;
     // network -> anyone
     std::atomic<int> id{-1};
     std::atomic<uint64_t> received{0}, invalid{0}, dropped{0}, lost_seq{0};
@@ -612,18 +617,26 @@ extern "C" int slowik_engine_push_packet(SlowikEngine* e, const uint8_t* data, s
         e->stream_count.store(n + 1, std::memory_order_release);
     }
     s->received.fetch_add(1, std::memory_order_relaxed);
-    if (s->have_seq) {
-        int32_t d = int32_t(h.seq - s->last_seq);  // wrap-safe
-        if (d > 0) {
-            if (d > 1 && d < 1000) s->lost_seq.fetch_add(uint64_t(d - 1), std::memory_order_relaxed);
-            s->last_seq = h.seq;
-        } else if (d < -1000) {
-            s->last_seq = h.seq;  // sender restart
-        }
-    } else {
+    // RTP-style loss: expected (highest - base + 1) minus received; reordering is not loss.
+    int32_t d = int32_t(h.seq - s->last_seq);  // wrap-safe
+    if (!s->have_seq || d < -1000 || d > 100000) {
+        // first packet or sender restart: fold the previous run into the total and start a new base
+        if (s->have_seq) s->lost_total_prev += s->lost_run;
         s->have_seq = true;
         s->last_seq = h.seq;
+        s->ext_highest = 0;
+        s->since_base = 0;
+        s->lost_run = 0;
+        d = 0;
     }
+    if (d > 0) {
+        s->ext_highest += d;
+        s->last_seq = h.seq;
+    }
+    ++s->since_base;
+    int64_t lost = s->ext_highest + 1 - int64_t(s->since_base);
+    s->lost_run = lost > 0 ? uint64_t(lost) : 0;
+    s->lost_seq.store(s->lost_total_prev + s->lost_run, std::memory_order_relaxed);
     s->battery.store(h.battery == 255 ? -1 : h.battery, std::memory_order_relaxed);
     s->rssi.store(h.rssi, std::memory_order_relaxed);
     s->flags.store(h.flags, std::memory_order_relaxed);
