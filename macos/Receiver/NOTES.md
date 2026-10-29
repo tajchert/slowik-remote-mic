@@ -28,7 +28,18 @@
 - `slowik-rx --play default` played through the DSP chain at an inaudible level ("Playing to MacBook Pro Speakers").
   `--play slowik` without the driver reports "Slowik Mic driver not installed".
 
+## Fix: start-up / stall bursts (after real-phone E2E)
+- A real phone delivered its first ~300 ms in one burst; the old engine anchored on it (fill ~300 ms forever) and the
+  jitter estimate clamped the target to 80 ms. Fixes: re-anchor after the resync drain, head-drop of excess fill,
+  robust bucketed jitter estimator with a 1 s skip after sync, and capture-time check so reordering inside a burst
+  isn't taken for a sender restart. Tests: `startBurstConvergesQuickly`, `midStreamStallFlushConvergesQuickly`,
+  `moderateJitterBurstFlushIsDrained`. Simulator: `slowik_sim.py send --burst-start-ms 300`.
+
 ## Known gaps
+- Two senders using the same stream_id (for example, a real phone plus the simulator on port 47800) thrash the
+  resync logic. Streams are keyed by stream_id only, not by source address. `scripts/integration.sh` therefore
+  uses port 47811.
+- Head-drop does not look for a quiet frame to drop; it drops at the next good frame with a crossfade.
 - **Not tested against the real Slowik Mic driver** (built in parallel). The device-attach code path is shared with
   the default-output path, which is tested.
 - Monitor and Slowik Mic can't play at the same time: the engine has a single consumer. A headphone monitor alongside

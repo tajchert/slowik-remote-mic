@@ -17,7 +17,7 @@ private func describe(_ r: SlowikSimResult) -> String {
     return "played=\(s.frames_played) concealed=\(s.frames_concealed) late=\(s.frames_late) dup=\(s.frames_duplicate) " +
         "under=\(s.underruns) (afterWarm=\(r.underruns_after_warmup)) resyncs=\(s.resyncs) loss‰=\(s.loss_permille) " +
         "jit=\(s.jitter_ms) target=\(s.target_ms) fill=\(s.fill_ms) fillErrMax=\(r.fill_err_max_ms) " +
-        "drift=\(s.drift_ppm) disc=\(r.discontinuities) maxStep=\(r.max_step) lat=\(s.latency_ms)"
+        "drift=\(s.drift_ppm) dropped=\(s.frames_dropped) latMax=\(r.latency_max_ms) disc=\(r.discontinuities) maxStep=\(r.max_step) lat=\(s.latency_ms)"
 }
 
 // MARK: - Protocol
@@ -106,8 +106,8 @@ func randomLossIsRecoveredByRedundancy(loss: Double) {
         $0.seconds = 120; $0.jitter_ms = 2; $0.seed = 11; $0.amp = 0.005 // quiet: faster shrink
         $0.burst_at_s = 20; $0.burst_len_s = 5; $0.burst_ms = 40
     }
-    #expect(r.target_max_ms > 35, "\(describe(r))")              // grew during the burst
-    #expect(r.stats.target_ms < r.target_max_ms - 15 && r.stats.target_ms > 12, "\(describe(r))") // and came back down later
+    #expect(r.target_max_ms > 28, "\(describe(r))")              // grew during the burst
+    #expect(r.stats.target_ms < r.target_max_ms - 12 && r.stats.target_ms > 10, "\(describe(r))") // and came back down later
     #expect(r.stats.link_state == SLOWIK_LINK_CONNECTED)
     #expect(r.discontinuities < 10, "\(describe(r))")             // a few concealments at burst onset only
 }
@@ -123,6 +123,37 @@ func clockSkewIsCompensated(ppm: Double) {
     #expect(r.fill_max_ms < 60, "\(describe(r))")
     #expect(r.discontinuities == 0, "\(describe(r))")
     #expect(r.stats.resyncs == 1)
+}
+
+@Test func startBurstConvergesQuickly() {
+    // Wi-Fi power-save wake-up: the first 300 ms of packets arrive at once, then steady 5 ms with ~3 ms jitter.
+    let r = sim { $0.seconds = 30; $0.burst_start_ms = 300; $0.jitter_ms = 3; $0.seed = 21
+                  $0.warmup_s = 0.3 + 2; $0.settle_s = 0 }
+    #expect(r.fill_err_max_ms < 10, "\(describe(r))")
+    #expect(r.underruns_after_warmup == 0, "\(describe(r))")
+    #expect(r.stats.target_ms < 25, "target poisoned by the burst: \(describe(r))")
+    #expect(r.latency_max_ms < 45, "\(describe(r))")
+    #expect(r.discontinuities == 0, "\(describe(r))")
+}
+
+@Test func midStreamStallFlushConvergesQuickly() {
+    // 250 ms Wi-Fi stall, then everything flushed at once.
+    let r = sim { $0.seconds = 30; $0.jitter_ms = 3; $0.seed = 22
+                  $0.stall_at_s = 8; $0.stall_len_s = 0.25; $0.warmup_s = 8.25 + 2; $0.settle_s = 0 }
+    #expect(r.fill_err_max_ms < 10, "\(describe(r))")
+    #expect(r.underruns_after_warmup == 0, "\(describe(r))")
+    #expect(r.stats.target_ms < 25, "target poisoned by the stall: \(describe(r))")
+    #expect(r.latency_max_ms < 45, "\(describe(r))")
+}
+
+@Test func moderateJitterBurstFlushIsDrained() {
+    // 120 ms stall (no link loss) then flush: excess must be dropped, not resynced.
+    let r = sim { $0.seconds = 20; $0.jitter_ms = 3; $0.seed = 23
+                  $0.stall_at_s = 8; $0.stall_len_s = 0.12; $0.warmup_s = 8.12 + 2; $0.settle_s = 0 }
+    #expect(r.stats.resyncs == 1 && r.stats.frames_dropped > 0, "\(describe(r))")
+    #expect(r.fill_err_max_ms < 10, "\(describe(r))")
+    #expect(r.underruns_after_warmup == 0, "\(describe(r))")
+    #expect(r.discontinuities == 0, "\(describe(r))")
 }
 
 @Test func senderRestartResyncs() {

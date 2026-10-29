@@ -29,6 +29,11 @@ typedef struct {
     double outage_at_s, outage_len_s;
     // sender restart at this time: seq and sample_index restart from 0 (0 = never)
     double restart_at_s;
+    // start burst: packets sent in the first burst_start_ms are held and delivered at once at that time
+    double burst_start_ms;
+    // stall + flush: packets sent in [stall_at, stall_at+stall_len) are delivered at once at the end
+    double stall_at_s, stall_len_s;
+    double settle_s;         // fill_err/fill_min/max are measured from warmup_s + settle_s (default 10)
     double warmup_s;         // stats below exclude the first warmup_s seconds
     const char* wav_path;    // optional: write rendered output (mono float->PCM16)
 } SlowikSimConfig;
@@ -47,6 +52,7 @@ typedef struct {
     double link_lost_at_s;
     double recovered_at_s;       // first time CONNECTED again after LOST
     double drift_ppm_final;
+    double latency_max_ms;       // max latency estimate after warmup + settle
 } SlowikSimResult;
 
 void slowik_sim_default(SlowikSimConfig* c);

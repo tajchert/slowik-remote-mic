@@ -22,7 +22,11 @@ constexpr int kMaxFramesPerPacket = 4;
 constexpr int kRingFrames = 128;  // 640 ms of storage
 constexpr int kQueueCap = 128;    // 640 ms of packets
 constexpr int kMaxStreams = 4;
-constexpr int kJitterWindow = 2000;  // first-arrival transit samples (~10 s)
+constexpr int kJitBucket = 200;      // first-arrival transit samples per jitter bucket (~1 s)
+constexpr int kJitBuckets = 10;      // buckets kept (~10 s); the worst 2 are ignored (single bursts/stalls)
+constexpr int64_t kJitSkipAfterSync = kRate;  // ignore arrivals in the first 1 s after (re)sync (start burst)
+constexpr double kDropExcessMs = 30;  // head-drop when fill stays > target + this ...
+constexpr double kDropHoldMs = 300;   // ... for this long
 constexpr int kXfade = 96;           // 2 ms crossfade concealment -> real audio
 constexpr double kConcealTau = 0.015;
 constexpr int64_t kRestartBackSamples = 9600;  // sample_index jumps back > 200 ms => sender restart
@@ -60,6 +64,7 @@ private:
 
 struct Item {
     uint64_t arrival_us;
+    uint64_t capture_us;
     int64_t newest_start;
     uint32_t seq;
     int nframes;
@@ -137,7 +142,7 @@ private:
 
 // ---------------------------------------------------------------------------------------------
 struct RenderStats {
-    std::atomic<uint64_t> frames_played{0}, frames_concealed{0}, frames_late{0}, frames_duplicate{0},
+    std::atomic<uint64_t> frames_played{0}, frames_concealed{0}, frames_late{0}, frames_duplicate{0}, frames_dropped{0},
         underruns{0}, resyncs{0}, link_lost_events{0};
     std::atomic<double> loss_permille{0}, jitter_ms{0}, jitter_mean_ms{0}, target_ms{0}, fill_ms{0},
         drift_ppm{0}, ratio_ppm{0}, latency_ms{0};
@@ -158,7 +163,10 @@ public:
     void process(const Item& it, RenderStats& st) {
         int64_t newest = it.newest_start;
         bool misaligned = synced_ && floor_div(newest - align_, kFrame) * kFrame != newest - align_;
-        bool restart = synced_ && (newest + kRestartBackSamples < max_start_ || misaligned);
+        // Sender restart: sample_index jumps back while the sender's capture clock keeps going forward. A packet
+        // that is merely old (reordered inside a burst) has an older capture time and is just late.
+        bool back = newest + kRestartBackSamples < max_start_ && it.capture_us + 50000 >= max_capture_;
+        bool restart = synced_ && (back || misaligned);
         bool too_far = synced_ && (newest + kFrame - rd_ > int64_t(kRingFrames - 4) * kFrame);
         if (!synced_ || link_state_ == SLOWIK_LINK_LOST || restart || too_far) {
             resync(it, st);
@@ -175,6 +183,7 @@ public:
             ss.seq = it.seq;
         }
         if (newest > max_start_) max_start_ = newest;
+        if (it.capture_us > max_capture_) max_capture_ = it.capture_us;
         for (int k = 0; k < it.nframes; ++k) {
             int64_t start = newest - int64_t(k) * kFrame;
             if (start < 0) break;
@@ -231,6 +240,7 @@ private:
         for (auto& t : tag_) t = INT64_MIN;
         max_end_ = it.newest_start + kFrame;
         max_start_ = it.newest_start;
+        max_capture_ = it.capture_us;
         rd_ = max_end_ - int64_t(std::lround(target_));
         int64_t oldest = it.newest_start - int64_t(it.nframes - 1) * kFrame;
         if (oldest < 0) oldest = align_;
@@ -247,7 +257,11 @@ private:
         xfade_left_ = 0;
         rs_.reset();
         fill_s_ = target_;
-        jit_count_ = jit_pos_ = 0;
+        bk_n_ = bres_count_ = bres_pos_ = 0;
+        since_sync_ = 0;
+        over_ = 0;
+        drop_req_ = 0;
+        reanchor_ = true;  // after this drain, anchor on the newest data (a burst may follow in the queue)
         for (auto& ss : seen_) ss.valid = false;
         for (auto& v : raw_hist_) v = 0;
         shrinking_ = false;
@@ -278,10 +292,35 @@ private:
         samples_since_new_ = 0;
         // First-arrival transit (sender sample clock vs arrival clock) for the jitter estimate.
         double transit = double(arrival_us) - double(end) * 1e6 / kRate;
-        jit_[jit_pos_] = transit;
-        jit_pos_ = (jit_pos_ + 1) % kJitterWindow;
-        if (jit_count_ < kJitterWindow) ++jit_count_;
+        if (since_sync_ < kJitSkipAfterSync) return;  // start-up burst would poison the estimate
+        bk_[bk_n_++] = transit;
+        if (bk_n_ == kJitBucket) {
+            bk_n_ = 0;
+            int k50 = kJitBucket / 2, k99 = int(0.995 * (kJitBucket - 1));  // 2nd-largest of 200
+            double mn = *std::min_element(bk_, bk_ + kJitBucket);
+            std::nth_element(bk_, bk_ + k99, bk_ + kJitBucket);
+            double p99 = bk_[k99];
+            std::nth_element(bk_, bk_ + k50, bk_ + k99);
+            double p50 = bk_[k50];
+            bres_p_[bres_pos_] = (p99 - p50) / 1000.0;
+            bres_m_[bres_pos_] = (p50 - mn) / 1000.0;
+            bres_pos_ = (bres_pos_ + 1) % kJitBuckets;
+            if (bres_count_ < kJitBuckets) ++bres_count_;
+        }
     }
+
+public:
+    // Called after each queue drain: right after a resync, re-anchor the read position on the newest data so a
+    // burst of queued packets (Wi-Fi power-save wake-up) does not start the buffer hundreds of ms deep.
+    void after_drain() {
+        if (!reanchor_) return;
+        reanchor_ = false;
+        int64_t want = max_end_ - int64_t(std::lround(target_));
+        if (want > rd_) rd_ = want;
+        fill_s_ = target_;
+    }
+
+private:
 
     float conceal_next() {
         if (!concealing_) {
@@ -326,6 +365,14 @@ private:
     }
 
     float next_input() {
+        if (drop_req_ > 0 && mode_ == kGood && !concealing_ && xfade_left_ == 0) {
+            // Head-drop excess latency: skip whole frames and crossfade (mirror continuation -> new audio).
+            rd_ += drop_req_ * kFrame;
+            fill_s_ -= double(drop_req_ * kFrame);
+            dropped_ += uint64_t(drop_req_);
+            drop_req_ = 0;
+            xfade_left_ = kXfade;  // concealing_ is false, so conceal_next() snapshots the last 5 ms played
+        }
         int64_t f = floor_div(rd_ - align_, kFrame);
         if (f != cur_f_) enter_frame(f);
         for (;;) {
@@ -373,6 +420,20 @@ private:
         const double fill = double(max_end_ - rd_);
         fill_s_ += (fill - fill_s_) * (1.0 - std::exp(-dt / 0.3));
 
+        // Excess fill (burst after a stall, or anything the resampler can't fix quickly): if the fill stays more
+        // than kDropExcessMs above target for kDropHoldMs, drop whole frames down to the target.
+        since_sync_ += n;
+        if (link_state_ == SLOWIK_LINK_CONNECTED && fill > target_ + kDropExcessMs * kRate / 1000.0) {
+            over_min_ = over_ == 0 ? fill : std::min(over_min_, fill);
+            over_ += n;
+            if (over_ >= int64_t(kDropHoldMs * kRate / 1000.0)) {
+                drop_req_ = int64_t((over_min_ - target_) / kFrame);
+                over_ = 0;
+            }
+        } else {
+            over_ = 0;
+        }
+
         target_tick_ += n;
         if (target_tick_ >= kRate / 5) {
             target_tick_ = 0;
@@ -404,20 +465,17 @@ private:
     }
 
     void update_target() {
-        if (jit_count_ < 200) return;
-        int n = jit_count_;
-        std::memcpy(scratch_, jit_, sizeof(double) * size_t(n));
-        double mn = scratch_[0], sum = 0;
-        for (int i = 0; i < n; ++i) {
-            mn = std::min(mn, scratch_[i]);
-            sum += scratch_[i];
-        }
-        double mean = sum / n;
-        int k = int(0.99 * (n - 1));
-        std::nth_element(scratch_, scratch_ + k, scratch_ + n);
-        double p99 = scratch_[k];
-        jitter_ms_ = (p99 - mean) / 1000.0;
-        jitter_mean_ms_ = (mean - mn) / 1000.0;
+        if (bres_count_ == 0) return;
+        // Robust jitter: 3rd-worst of the last ~10 one-second buckets (p99 - p50 each), so one burst or stall
+        // (which spans at most two buckets) does not set the target; persistent jitter does.
+        double v[kJitBuckets], m[kJitBuckets];
+        int n = bres_count_;
+        std::memcpy(v, bres_p_, sizeof(double) * size_t(n));
+        std::memcpy(m, bres_m_, sizeof(double) * size_t(n));
+        std::sort(v, v + n, [](double x, double y) { return x > y; });
+        std::sort(m, m + n);
+        jitter_ms_ = v[std::min(2, n - 1)];
+        jitter_mean_ms_ = m[n / 2];
         double block_ms = 1000.0 * block_ / kRate;
         // half a packet of sawtooth + one block of drain granularity + one block of render-ahead + resampler
         double raw_ms = jitter_ms_ + 2.5 + 2 * block_ms + 8.0 * 1000.0 / kRate + cfg_.margin_ms;
@@ -466,6 +524,7 @@ private:
         st.frames_concealed.store(concealed_, R);
         st.frames_late.store(late_, R);
         st.underruns.store(underruns_, R);
+        st.frames_dropped.store(dropped_, R);
         st.link_lost_events.store(link_lost_events_, R);
         uint64_t p = 0, l = 0;
         for (int i = 0; i < 5; ++i) {
@@ -518,9 +577,15 @@ private:
     int link_state_ = SLOWIK_LINK_WAITING;
     int64_t samples_since_new_ = 0;
     // jitter
-    double jit_[kJitterWindow];
-    double scratch_[kJitterWindow];
-    int jit_count_ = 0, jit_pos_ = 0;
+    double bk_[kJitBucket];
+    int bk_n_ = 0;
+    double bres_p_[kJitBuckets] = {}, bres_m_[kJitBuckets] = {};
+    int bres_count_ = 0, bres_pos_ = 0;
+    int64_t since_sync_ = 0, over_ = 0, drop_req_ = 0;
+    double over_min_ = 0;
+    bool reanchor_ = false;
+    uint64_t max_capture_ = 0;
+    uint64_t dropped_ = 0;
     struct SeqSeen {
         uint32_t seq;
         bool valid;
@@ -650,6 +715,7 @@ extern "C" int slowik_engine_push_packet(SlowikEngine* e, const uint8_t* data, s
     it->arrival_us = arrival_us;
     it->newest_start = int64_t(h.sample_index);
     it->seq = h.seq;
+    it->capture_us = h.capture_time_us;
     it->nframes = std::min(h.frame_count, kMaxFramesPerPacket);
     const uint8_t* p = h.frames;
     const size_t bps = h.codec == 2 ? 3 : 2;
@@ -680,6 +746,7 @@ extern "C" void slowik_engine_render(SlowikEngine* e, float* out, int n) {
             if (i == 0) s.pipe.process(*it, e->rstats);
             s.queue.pop();
         }
+        if (i == 0) s.pipe.after_drain();
     }
     double lat = e->out_latency_ms.load(std::memory_order_relaxed);
     bool muted = e->mute.load(std::memory_order_relaxed) != 0;
@@ -715,6 +782,7 @@ extern "C" void slowik_engine_get_stats(SlowikEngine* e, SlowikStats* o) {
     o->frames_late = r.frames_late.load(R);
     o->frames_duplicate = r.frames_duplicate.load(R);
     o->underruns = r.underruns.load(R);
+    o->frames_dropped = r.frames_dropped.load(R);
     o->resyncs = r.resyncs.load(R);
     o->link_lost_events = r.link_lost_events.load(R);
     o->loss_permille = r.loss_permille.load(R);
