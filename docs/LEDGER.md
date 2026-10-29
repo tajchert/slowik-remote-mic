@@ -9,9 +9,11 @@
 ## Real-device E2E (2026-10-29, OnePlus CPH2747, Android API 37, same home Wi-Fi)
 - Oboe granted: 48 kHz, LowLatency (perf=12), Unprocessed (preset 9), **Shared** (not Exclusive), burst 240.
 - Phone → `slowik-rx`: 200 pkt/s, 0 loss, jitter 3–4 ms, battery/RSSI received.
-- BUG: start-up burst (~300 ms) anchors jitter buffer at ~300 ms; never drains. Fix in progress on `mac-receiver`.
+- Fixed: start-up burst (~300 ms) anchored the jitter buffer; now re-anchors + head-drops, settles to target in <2 s (4685577).
+- Driver installed; loopback check PASS (~8 ms loopback).
 
 ## Open
+- Receiver keys streams by stream_id only: two senders on one port cause constant resyncs. Lock a stream to its sender address.
 - Install driver (needs sudo) and verify Slowik Mic in Google Meet.
 - Measure real end-to-end latency (clap test).
 - QR scan on phone, packet auth, Opus fallback, shared-memory driver (option C), multi-phone, iOS.
