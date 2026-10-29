@@ -156,6 +156,46 @@ func clockSkewIsCompensated(ppm: Double) {
     #expect(r.discontinuities == 0, "\(describe(r))")
 }
 
+@Test(arguments: [128, 512, 1024])
+func largeRenderBlocksAndLateDeviceStartConverge(block: Int32) {
+    // Device starts pulling 100 ms after packets arrive (packets pile up), in big chunks, with a start burst.
+    let r = sim { $0.seconds = 30; $0.jitter_ms = 4; $0.seed = 31; $0.render_block = block
+                  $0.render_start_ms = 100; $0.burst_start_ms = 300; $0.warmup_s = 3; $0.settle_s = 0 }
+    #expect(r.fill_err_max_ms < 10, "\(describe(r))")
+    #expect(r.underruns_after_warmup == 0, "\(describe(r))")
+    #expect(r.discontinuities == 0, "\(describe(r))")
+}
+
+@Test func powerSaveBatchedArrivalsStayBounded() {
+    // Wi-Fi power save: packets only delivered every 60 ms in batches. Target must cover it; no runaway fill.
+    let r = sim { $0.seconds = 40; $0.jitter_ms = 2; $0.seed = 32; $0.arrival_quantum_ms = 60
+                  $0.warmup_s = 5; $0.settle_s = 5 }
+    #expect(r.fill_err_max_ms < 10, "\(describe(r))")
+    #expect(r.underruns_after_warmup <= 1, "\(describe(r))")
+    #expect(r.stats.target_ms < 80, "\(describe(r))")
+}
+
+@Test func secondSenderOnSameStreamIsIgnored() {
+    let r = sim { $0.seconds = 20; $0.jitter_ms = 3; $0.seed = 33; $0.second_sender_offset_ms = 80 }
+    #expect(r.stats.resyncs == 1, "\(describe(r))")
+    #expect(r.stats.packets_foreign > 3000, "\(describe(r))")
+    #expect(r.stats.frames_concealed == 0 && r.discontinuities == 0, "\(describe(r))")
+    #expect(r.fill_err_max_ms < 3, "\(describe(r))")
+}
+
+@Test func senderSwitchAfterSilence() {
+    // Locked sender goes silent (outage > 2 s); a packet from anywhere is then accepted again.
+    let e = slowik_engine_create(nil)!
+    defer { slowik_engine_destroy(e) }
+    var buf = [UInt8](repeating: 0, count: 1024)
+    let frames = [Float](repeating: 0, count: 480)
+    let len = slowik_build_audio(&buf, buf.count, 0, 1, 240, 0, 50, 0, 0, 1, frames, 2)
+    #expect(slowik_engine_push_packet_from(e, buf, len, 1_000_000, 1) == 0)
+    #expect(slowik_engine_push_packet_from(e, buf, len, 1_100_000, 2) == Int32(SLOWIK_PUSH_FOREIGN_SENDER))
+    #expect(slowik_engine_push_packet_from(e, buf, len, 3_100_001, 2) == 0)
+    #expect(slowik_engine_push_packet_from(e, buf, len, 3_200_000, 1) == Int32(SLOWIK_PUSH_FOREIGN_SENDER))
+}
+
 @Test func senderRestartResyncs() {
     let r = sim { $0.seconds = 20; $0.restart_at_s = 8; $0.loss = 0.01; $0.seed = 9 }
     #expect(r.stats.resyncs == 2, "\(describe(r))")

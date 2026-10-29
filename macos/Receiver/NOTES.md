@@ -35,10 +35,17 @@
   isn't taken for a sender restart. Tests: `startBurstConvergesQuickly`, `midStreamStallFlushConvergesQuickly`,
   `moderateJitterBurstFlushIsDrained`. Simulator: `slowik_sim.py send --burst-start-ms 300`.
 
+## Fix 2: real phone with `--play slowik` (fill stuck above target, drift always 0, two senders)
+- Head-drop now also fires while concealing, uses a 10 ms / 500 ms threshold, and the target no longer adds 2× the
+  render block for large (512/1024-frame) callbacks.
+- The drift readout used to be gated on catch-up ending with a small error, which never happened on a real phone.
+  It is now the slope of the min-transit envelope.
+- Sender lock per stream (ip:port). Tests: `largeRenderBlocksAndLateDeviceStartConverge` (128/512/1024),
+  `powerSaveBatchedArrivalsStayBounded`, `secondSenderOnSameStreamIsIgnored`, `senderSwitchAfterSilence`.
+
 ## Known gaps
-- Two senders using the same stream_id (for example, a real phone plus the simulator on port 47800) thrash the
-  resync logic. Streams are keyed by stream_id only, not by source address. `scripts/integration.sh` therefore
-  uses port 47811.
+- The drift readout is the phone vs the Mac host clock. A device whose clock differs from the host clock adds its
+  own offset, which the PI loop absorbs but the readout does not show.
 - Head-drop does not look for a quiet frame to drop; it drops at the next good frame with a crossfade.
 - **Not tested against the real Slowik Mic driver** (built in parallel). The device-attach code path is shared with
   the default-output path, which is tested.

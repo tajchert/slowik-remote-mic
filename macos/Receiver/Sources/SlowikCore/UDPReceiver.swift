@@ -82,7 +82,13 @@ public final class UDPReceiver {
             }
             let now = monotonicMicros()
             if n > 0 {
-                let r = slowik_engine_push_packet(engine, buf, n, now)
+                // Source key = IPv4 address + port: the engine locks a stream to one sender (see push_packet_from).
+                let key: UInt64 = withUnsafePointer(to: &from) {
+                    $0.withMemoryRebound(to: sockaddr_in.self, capacity: 1) {
+                        (UInt64($0.pointee.sin_addr.s_addr) << 16) | UInt64($0.pointee.sin_port)
+                    }
+                }
+                let r = slowik_engine_push_packet_from(engine, buf, n, now, key)
                 if r == 0 || r == Int32(SLOWIK_PUSH_QUEUE_FULL) {
                     peer = from
                     peerLen = fromLen

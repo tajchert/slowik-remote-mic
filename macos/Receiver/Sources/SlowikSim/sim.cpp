@@ -13,6 +13,7 @@ struct Arrival {
     double t_us;
     uint64_t order;
     std::vector<uint8_t> pkt;
+    uint64_t key;
     bool operator>(const Arrival& o) const { return t_us != o.t_us ? t_us > o.t_us : order > o.order; }
 };
 
@@ -112,10 +113,24 @@ extern "C" int slowik_sim_run(const SlowikSimConfig* c, const SlowikConfig* ecfg
                 if (ts < c->burst_start_ms * 1e3) at = c->burst_start_ms * 1e3 + U(rng) * 500.0;
                 double s0 = c->stall_at_s * 1e6, s1 = (c->stall_at_s + c->stall_len_s) * 1e6;
                 if (c->stall_len_s > 0 && at >= s0 && at < s1) at = s1 + U(rng) * 500.0;
-                net.push(Arrival{at, order++, std::vector<uint8_t>(buf.begin(), buf.begin() + long(len))});
+                if (c->arrival_quantum_ms > 0) {
+                    double q = c->arrival_quantum_ms * 1e3;
+                    at = std::ceil(at / q) * q;
+                }
+                net.push(Arrival{at, order++, std::vector<uint8_t>(buf.begin(), buf.begin() + long(len)), 1});
                 if (U(rng) < c->dup_prob)
                     net.push(Arrival{ts + d + U(rng) * 2000.0, order++,
-                                     std::vector<uint8_t>(buf.begin(), buf.begin() + long(len))});
+                                     std::vector<uint8_t>(buf.begin(), buf.begin() + long(len)), 1});
+                int64_t off = int64_t(c->second_sender_offset_ms * 48);
+                if (off > 0 && int64_t(sidx) >= off) {
+                    // same audio, other socket: different seq space and lagging sample_index
+                    std::vector<uint8_t> p2(buf.begin(), buf.begin() + long(len));
+                    uint32_t s2 = seq + 777777;
+                    uint64_t i2 = sidx - uint64_t(off);
+                    std::memcpy(&p2[8], &s2, 4);
+                    std::memcpy(&p2[12], &i2, 8);
+                    net.push(Arrival{ts + 1000.0 + U(rng) * c->jitter_ms * 1000.0, order++, p2, 2});
+                }
             }
             ++pkt_i;
             ++local_i;
@@ -140,8 +155,12 @@ extern "C" int slowik_sim_run(const SlowikSimConfig* c, const SlowikConfig* ecfg
         send_until(t);
         while (!net.empty() && net.top().t_us <= t) {
             const Arrival& a = net.top();
-            slowik_engine_push_packet(e, a.pkt.data(), a.pkt.size(), uint64_t(a.t_us));
+            slowik_engine_push_packet_from(e, a.pkt.data(), a.pkt.size(), uint64_t(a.t_us), a.key);
             net.pop();
+        }
+        if (t < c->render_start_ms * 1e3) {
+            ++blk;
+            continue;
         }
         slowik_engine_render(e, out.data(), B);
         SlowikStats st;

@@ -37,6 +37,7 @@ enum {
     SLOWIK_PARSE_NO_FRAMES = -6,
     SLOWIK_PUSH_QUEUE_FULL = -10,
     SLOWIK_PUSH_TOO_MANY_STREAMS = -11,
+    SLOWIK_PUSH_FOREIGN_SENDER = -12,  // stream is locked to another source address
 };
 
 typedef struct {
@@ -69,6 +70,7 @@ typedef struct {
     uint64_t packets_invalid;
     uint64_t packets_dropped_queue;
     uint64_t packets_lost_seq;    // before redundancy, from seq gaps
+    uint64_t packets_foreign;     // ignored: same stream_id from a second source address
     // render thread
     uint64_t frames_played;
     uint64_t frames_concealed;    // lost after redundancy (or arrived too late)
@@ -107,6 +109,10 @@ void slowik_engine_destroy(SlowikEngine* e);
 
 // Network thread. arrival_us: monotonic receive time in microseconds.
 int slowik_engine_push_packet(SlowikEngine* e, const uint8_t* data, size_t len, uint64_t arrival_us);
+// Same, with an opaque source-address key (e.g. hash of ip:port). A stream is locked to the first sender's key;
+// packets from other keys are ignored until the locked sender has been silent for > 2 s.
+int slowik_engine_push_packet_from(SlowikEngine* e, const uint8_t* data, size_t len, uint64_t arrival_us,
+                                   uint64_t source_key);
 
 // Real-time thread. Writes n mono float samples at 48 kHz.
 void slowik_engine_render(SlowikEngine* e, float* out, int n);
