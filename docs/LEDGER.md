@@ -11,9 +11,10 @@
 - Phone → `slowik-rx`: 200 pkt/s, 0 loss, jitter 3–4 ms, battery/RSSI received.
 - Fixed: start-up burst (~300 ms) anchored the jitter buffer; now re-anchors + head-drops, settles to target in <2 s (4685577).
 - Driver installed; loopback check PASS (~8 ms loopback).
+- Fixed (d20608a): head-drop in AVAudioEngine render path, drift estimate on real data, stream locked to one sender. Real phone → Slowik Mic: 38–43 ms, 0 % loss.
+- README with real screenshots, diagrams and charts (`docs/images/`, sources in `docs/images/src/`).
 
 ## Open
-- Receiver keys streams by stream_id only: two senders on one port cause constant resyncs. Lock a stream to its sender address.
 - Install driver (needs sudo) and verify Slowik Mic in Google Meet.
 - Measure real end-to-end latency (clap test).
 - QR scan on phone, packet auth, Opus fallback, shared-memory driver (option C), multi-phone, iOS.

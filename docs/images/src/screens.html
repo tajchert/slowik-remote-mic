@@ -1,0 +1,27 @@
+<!doctype html>
+<!-- Rendered to docs/images/screens.png by render.sh (1600x640). Real screenshots: OnePlus phone + macOS menu-bar panel. -->
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css">
+<style>
+  body { width: 1600px; height: 640px; padding: 40px 50px 0; display: flex; gap: 26px; align-items: flex-start;
+         background: radial-gradient(900px 500px at 22% 40%, #1a2333 0%, var(--bg) 70%); }
+  figure { display: flex; flex-direction: column; align-items: center; }
+  img { display: block; border-radius: 22px; box-shadow: 0 20px 50px rgba(0,0,0,.55); }
+  .phone img { width: 236px; height: 479px; border: 6px solid #1c2128; border-radius: 30px; }
+  .mac img { width: 340px; border-radius: 14px; }
+  figcaption { margin-top: 18px; text-align: center; font-size: 17px; font-weight: 700; }
+  figcaption span { display: block; font-size: 14px; font-weight: 400; color: var(--muted); margin-top: 4px; max-width: 250px; }
+  .divider { width: 1px; align-self: stretch; margin: 10px 4px 120px; background: var(--line); }
+</style></head>
+<body>
+  <figure class="mac"><img src="../screens/mac-receiver.png">
+    <figcaption>Mac · operator panel<span>LIVE tally, meters, loss, latency, drift, QR pairing</span></figcaption></figure>
+  <div class="divider"></div>
+  <figure class="phone"><img src="../screens/phone-setup.png">
+    <figcaption>Pick the Mac<span>Found automatically, plus a pre-flight checklist</span></figcaption></figure>
+  <figure class="phone"><img src="../screens/phone-ready.png">
+    <figcaption>READY<span>Streaming, waiting for the operator</span></figcaption></figure>
+  <figure class="phone"><img src="../screens/phone-live.png">
+    <figcaption>LIVE<span>The Mac put you on air</span></figcaption></figure>
+  <figure class="phone"><img src="../screens/phone-muted.png">
+    <figcaption>MUTED<span>Hold anywhere. No accidental taps</span></figcaption></figure>
+</body></html>

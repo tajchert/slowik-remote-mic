@@ -1,0 +1,50 @@
+<!doctype html>
+<!-- Rendered to docs/images/latency.png by render.sh (1600x340) -->
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css">
+<style>
+  body { width: 1600px; height: 340px; padding: 40px 50px; }
+  h2 { font-size: 30px; font-weight: 700; margin-bottom: 6px; }
+  .lede { color: var(--muted); font-size: 19px; margin-bottom: 34px; }
+  .track { position: relative; }
+  .bar { display: flex; height: 70px; border-radius: 12px; overflow: hidden; }
+  .seg { display: flex; flex-direction: column; justify-content: center; padding: 0 12px; border-right: 2px solid var(--bg);
+         font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; }
+  .seg small { font-family: "SF Mono", Menlo, monospace; font-weight: 400; font-size: 13px; opacity: .85; margin-top: 3px; }
+  .ph { background: #5a4210; color: #ffe2a6; }
+  .ai { background: #3d2c07; color: #ffd27a; }
+  .mc { background: #1f3b63; color: #cfe3ff; }
+  .mc2 { background: #172c4a; color: #cfe3ff; }
+  .dv { background: #0f5132; color: #b6f0cf; }
+  .axis { position: relative; height: 34px; margin-top: 8px; font-family: "SF Mono", Menlo, monospace; font-size: 13px; color: var(--muted); }
+  .tick { position: absolute; top: 0; transform: translateX(-50%); }
+  .tick::before { content: ""; display: block; width: 1px; height: 8px; background: var(--line); margin: 0 auto 4px; }
+  .goal { position: absolute; top: -12px; bottom: -40px; border-left: 2px dashed var(--red); }
+  .goal span { position: absolute; top: -26px; left: 6px; color: var(--red); font-size: 14px; font-weight: 700; white-space: nowrap; }
+  .legend { display: flex; gap: 28px; margin-top: 22px; font-size: 15px; color: var(--muted); }
+  .legend b { color: var(--text); }
+  i.m { font-style: normal; color: var(--green); }
+</style></head>
+<body>
+  <h2>Where the milliseconds go</h2>
+  <div class="lede">Mouth to meeting app, for one phone on a quiet 5 GHz network. The meeting app's own network delay comes on top, the same as for any mic.</div>
+  <!-- 1 ms = 30 px; total width 1500 px = 50 ms -->
+  <div class="track">
+    <div class="bar">
+      <div class="seg ph"  style="width:300px">Phone capture<small>~10 ms</small></div>
+      <div class="seg ph"  style="width:150px">Packet<small>5 ms</small></div>
+      <div class="seg ai"  style="width:90px">Wi-Fi<small>~3</small></div>
+      <div class="seg mc"  style="width:450px"><span>Jitter buffer <i class="m">●</i></span><small>~15 ms (adaptive, 10–30)</small></div>
+      <div class="seg mc2" style="width:40px;padding:0 6px">DSP<small>1</small></div>
+      <div class="seg dv"  style="width:240px"><span>Slowik Mic <i class="m">●</i></span><small>~8 ms</small></div>
+    </div>
+    <div class="goal" style="left:1260px;border-color:var(--amber)"><span style="color:var(--amber)">≈ 42 ms total</span></div>
+  </div>
+  <div class="axis">
+    <div class="tick" style="left:0">0</div><div class="tick" style="left:300px">10</div><div class="tick" style="left:600px">20</div>
+    <div class="tick" style="left:900px">30</div><div class="tick" style="left:1200px">40</div><div class="tick" style="left:1500px">50 ms</div>
+  </div>
+  <div class="legend">
+    <div><i class="m">●</i> <b>measured</b> on real hardware: jitter-buffer target 15–31 ms on home Wi-Fi; device loopback 8 ms</div>
+    <div>The receiver reports 38–43 ms end to end with a OnePlus. Phone capture varies by model.</div>
+  </div>
+</body></html>

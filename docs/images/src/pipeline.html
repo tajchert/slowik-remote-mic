@@ -1,0 +1,60 @@
+<!doctype html>
+<!-- Rendered to docs/images/pipeline.png by render.sh (1600x540) -->
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css">
+<style>
+  body { width: 1600px; height: 540px; padding: 40px 50px; }
+  h2 { font-size: 30px; font-weight: 700; margin-bottom: 6px; }
+  .lede { color: var(--muted); font-size: 19px; margin-bottom: 30px; }
+  .row { display: flex; align-items: stretch; gap: 0; }
+  .zone { border: 1px solid var(--line); border-radius: 18px; padding: 18px 18px 16px; background: var(--panel); }
+  .zone h3 { font-size: 15px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); margin-bottom: 14px; }
+  .zone.phone { border-color: #5a4210; }
+  .zone.phone h3 { color: var(--amber); }
+  .zone.mac h3 { color: #79c0ff; }
+  .zone.mac { border-color: #1f3b63; }
+  .stages { display: flex; gap: 10px; }
+  .zone.mac .st { flex: 1; }
+  .st { width: 150px; background: #0d1117; border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+  .st b { display: block; font-size: 17px; margin-bottom: 6px; }
+  .st p { font-size: 13.5px; color: var(--muted); line-height: 1.35; }
+  .st .ms { margin-top: 10px; font-family: "SF Mono", Menlo, monospace; font-size: 13px; color: var(--amber); }
+  .air { width: 150px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+  .air svg { margin-bottom: 8px; }
+  .air .t { font-size: 15px; font-weight: 600; }
+  .air .s { font-size: 13px; color: var(--muted); margin-top: 4px; }
+  .arrow { color: var(--line); font-size: 22px; align-self: center; margin: 0 -4px; }
+  .out { margin-top: 26px; display: flex; gap: 16px; align-items: center; font-size: 17px; color: var(--muted); }
+  .pill { background: #0d1117; border: 1px solid var(--line); border-radius: 999px; padding: 8px 16px; color: var(--text); }
+  .pill.dev { border-color: var(--amber); color: var(--amber); font-weight: 700; }
+</style></head>
+<body>
+  <h2>The signal chain</h2>
+  <div class="lede">The phone stays dumb: capture and send. The Mac does everything smart. Numbers are per-stage latency.</div>
+  <div class="row">
+    <div class="zone phone">
+      <h3>Android phone · Kotlin + C++</h3>
+      <div class="stages">
+        <div class="st"><b>Oboe capture</b><p>48 kHz mono, <i>Unprocessed</i> preset: no AGC, no call-style noise suppression</p><div class="ms">~5–20 ms</div></div>
+        <div class="st"><b>Packetiser</b><p>5 ms frames, PCM16, each packet also carries the previous frame</p><div class="ms">5 ms</div></div>
+      </div>
+    </div>
+    <div class="air">
+      <svg width="90" height="60" viewBox="0 0 90 60"><g fill="none" stroke="#ffb300" stroke-width="4" stroke-linecap="round">
+        <path d="M30 18 q8 12 0 24"/><path d="M44 8 q16 22 0 44" opacity=".7"/><path d="M58 0 q24 30 0 60" opacity=".4"/></g></svg>
+      <div class="t">Wi-Fi · UDP</div><div class="s">200 packets/s<br>low-latency Wi-Fi lock</div>
+      <div class="s mono" style="color:var(--amber);margin-top:8px">2–5 ms</div>
+    </div>
+    <div class="zone mac" style="flex:1">
+      <h3>Mac · menu-bar app (Swift + C++ engine)</h3>
+      <div class="stages">
+        <div class="st"><b>Jitter buffer</b><p>Adaptive target from p99 jitter. Drops excess after Wi-Fi bursts</p><div class="ms">10–30 ms</div></div>
+        <div class="st"><b>Drift resampler</b><p>Windowed-sinc, steered by a PI loop on buffer fill (±200 ppm)</p><div class="ms">~0.2 ms</div></div>
+        <div class="st"><b>Voice chain</b><p>Trim → high-pass 90 Hz → compressor → −1 dB limiter</p><div class="ms">~1 ms</div></div>
+        <div class="st"><b>Slowik Mic</b><p>Virtual device: AudioServerPlugIn on libASPL</p><div class="ms">~8 ms</div></div>
+      </div>
+    </div>
+  </div>
+  <div class="out">Every app that can pick a microphone sees it →
+    <span class="pill dev">🎙 Slowik Mic</span><span class="pill">Google Meet</span><span class="pill">Zoom</span><span class="pill">Teams</span><span class="pill">OBS</span>
+  </div>
+</body></html>

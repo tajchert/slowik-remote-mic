@@ -1,0 +1,42 @@
+<!doctype html>
+<!-- Rendered to docs/images/packet.png by render.sh (1600x430) -->
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css">
+<style>
+  body { width: 1600px; height: 430px; padding: 40px 50px; }
+  h2 { font-size: 30px; font-weight: 700; margin-bottom: 6px; }
+  .lede { color: var(--muted); font-size: 19px; margin-bottom: 28px; }
+  .bar { display: flex; height: 92px; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); }
+  .f { display: flex; flex-direction: column; justify-content: center; align-items: center; border-right: 1px solid var(--bg);
+       font-size: 15px; font-weight: 600; text-align: center; padding: 0 4px; }
+  .f small { font-family: "SF Mono", Menlo, monospace; font-weight: 400; font-size: 12px; opacity: .75; margin-top: 4px; }
+  .h { background: #1f2a37; }
+  .k { background: #283a52; }
+  .s { background: #3d2c07; color: #ffd27a; }
+  .a { background: #5a4210; color: #ffe2a6; }
+  .b { background: #2b1f05; color: #c9a75a; }
+  .scale { display: flex; margin-top: 10px; font-family: "SF Mono", Menlo, monospace; font-size: 13px; color: var(--muted); }
+  .notes { display: flex; gap: 40px; margin-top: 26px; font-size: 16px; color: var(--muted); }
+  .notes b { color: var(--text); }
+</style></head>
+<body>
+  <h2>One packet = 5 ms of voice</h2>
+  <div class="lede">32-byte header plus two frames: the newest and a copy of the previous one, so any single lost packet is recovered for free.</div>
+  <div class="bar">
+    <div class="f h" style="flex:4">SLWK<small>magic</small></div>
+    <div class="f h" style="flex:1.6">v1<small>ver</small></div>
+    <div class="f h" style="flex:1.6">AUDIO<small>type</small></div>
+    <div class="f k" style="flex:2">stream<small>u16</small></div>
+    <div class="f k" style="flex:4">seq<small>u32</small></div>
+    <div class="f k" style="flex:8">sample index<small>u64 · drift reference</small></div>
+    <div class="f k" style="flex:8">capture time<small>u64 µs</small></div>
+    <div class="f h" style="flex:3.2">🔋 📶 flags codec<small>4 × u8</small></div>
+    <div class="f a" style="flex:24">frame N · 240 samples<small>480 B PCM16</small></div>
+    <div class="f b" style="flex:24">frame N−1 (redundant copy)<small>480 B PCM16</small></div>
+  </div>
+  <div class="scale"><span style="flex:32.4">0 ───── 32 B header</span><span style="flex:24">← newest frame</span><span style="flex:24;text-align:right">992 B →</span></div>
+  <div class="notes">
+    <div><b>200 packets/s</b> · ≈1.6 Mbit/s: trivial for a private 5 GHz link</div>
+    <div><b>Back-channel:</b> the Mac answers 5×/s with LIVE, mute, loss and latency</div>
+    <div><b>stream id</b> on every packet: multi-phone needs no protocol change</div>
+  </div>
+</body></html>
