@@ -73,7 +73,8 @@ typedef struct {
     uint64_t frames_played;
     uint64_t frames_concealed;    // lost after redundancy (or arrived too late)
     uint64_t frames_late;         // arrived after their playout time
-    uint64_t frames_duplicate;    // duplicate packets (newest frame already present)
+    uint64_t frames_duplicate;    // duplicate packets (same seq seen recently)
+    uint64_t frames_dropped;      // dropped from the buffer head to remove excess latency (bursts)
     uint64_t underruns;           // buffer ran empty -> stalled with concealment
     uint64_t resyncs;
     uint64_t link_lost_events;

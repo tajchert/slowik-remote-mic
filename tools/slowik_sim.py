@@ -116,7 +116,11 @@ def cmd_send(a):
         prev = cur
         if random.random() >= a.loss:
             delay = random.uniform(0, a.jitter_ms / 1000.0)
-            pending.append((time.monotonic() + delay, pkt))
+            if sidx * 1000.0 / RATE < a.burst_start_ms:
+                # Wi-Fi power-save wake-up: hold the first N ms of packets, then send them all at once.
+                pending.append((t0 + a.burst_start_ms / 1000.0, pkt))
+            else:
+                pending.append((time.monotonic() + delay, pkt))
         now = time.monotonic()
         pending.sort(key=lambda x: x[0])
         while pending and pending[0][0] <= now:
@@ -194,6 +198,8 @@ def main():
     s.add_argument("--loss", type=float, default=0.0, help="random packet loss probability")
     s.add_argument("--jitter-ms", type=float, default=0.0, help="max random extra delay per packet")
     s.add_argument("--ppm", type=float, default=0.0, help="sender clock skew in ppm")
+    s.add_argument("--burst-start-ms", type=float, default=0.0,
+                   help="withhold the first N ms of packets and send them at once (start-up burst)")
     r = sub.add_parser("receive")
     r.add_argument("--port", type=int, default=PORT)
     r.add_argument("--wav", help="write received audio here on Ctrl-C")

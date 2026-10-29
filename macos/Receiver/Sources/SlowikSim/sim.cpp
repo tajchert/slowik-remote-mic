@@ -54,6 +54,7 @@ extern "C" void slowik_sim_default(SlowikSimConfig* c) {
     c->render_block = 128;
     c->seed = 1;
     c->warmup_s = 2;
+    c->settle_s = 10;
 }
 
 extern "C" int slowik_sim_run(const SlowikSimConfig* c, const SlowikConfig* ecfg, SlowikSimResult* r) {
@@ -107,7 +108,11 @@ extern "C" int slowik_sim_run(const SlowikSimConfig* c, const SlowikConfig* ecfg
                 double d = 1000.0 + U(rng) * c->jitter_ms * 1000.0;
                 if (c->burst_len_s > 0 && ts >= c->burst_at_s * 1e6 && ts < (c->burst_at_s + c->burst_len_s) * 1e6)
                     d += U(rng) * c->burst_ms * 1000.0;
-                net.push(Arrival{ts + d, order++, std::vector<uint8_t>(buf.begin(), buf.begin() + long(len))});
+                double at = ts + d;
+                if (ts < c->burst_start_ms * 1e3) at = c->burst_start_ms * 1e3 + U(rng) * 500.0;
+                double s0 = c->stall_at_s * 1e6, s1 = (c->stall_at_s + c->stall_len_s) * 1e6;
+                if (c->stall_len_s > 0 && at >= s0 && at < s1) at = s1 + U(rng) * 500.0;
+                net.push(Arrival{at, order++, std::vector<uint8_t>(buf.begin(), buf.begin() + long(len))});
                 if (U(rng) < c->dup_prob)
                     net.push(Arrival{ts + d + U(rng) * 2000.0, order++,
                                      std::vector<uint8_t>(buf.begin(), buf.begin() + long(len))});
@@ -162,7 +167,8 @@ extern "C" int slowik_sim_run(const SlowikSimConfig* c, const SlowikConfig* ecfg
         }
         if (warm) {
             if (st.target_ms > r->target_max_ms) r->target_max_ms = st.target_ms;
-            if (ts >= c->warmup_s + 10) {
+            if (ts >= c->warmup_s + c->settle_s) {
+                r->latency_max_ms = std::fmax(r->latency_max_ms, st.latency_ms);
                 r->fill_err_max_ms = std::fmax(r->fill_err_max_ms, std::fabs(st.fill_ms - st.target_ms));
                 r->fill_max_ms = std::fmax(r->fill_max_ms, st.fill_ms);
                 r->fill_min_ms = std::fmin(r->fill_min_ms, st.fill_ms);
