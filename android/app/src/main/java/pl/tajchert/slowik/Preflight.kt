@@ -7,10 +7,11 @@ import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.BatteryManager
+import android.os.Build
 import android.os.PowerManager
 import androidx.core.content.ContextCompat
 
-enum class CheckId { MIC, DND, BATTERY, WIFI, BATTERY_OPT }
+enum class CheckId { MIC, LOCAL_NETWORK, DND, BATTERY, WIFI, BATTERY_OPT }
 
 data class CheckItem(val id: CheckId, val title: String, val ok: Boolean, val detail: String)
 
@@ -21,8 +22,13 @@ fun evaluatePreflight(
     batteryPct: Int,
     onWifi: Boolean,
     batteryOptExempt: Boolean,
+    localNetworkGranted: Boolean = true,
 ): List<CheckItem> = listOf(
     CheckItem(CheckId.MIC, "Microphone permission", micGranted, if (micGranted) "granted" else "needed to stream"),
+    CheckItem(
+        CheckId.LOCAL_NETWORK, "Local network access", localNetworkGranted,
+        if (localNetworkGranted) "granted" else "denied: nothing reaches the Mac",
+    ),
     CheckItem(CheckId.DND, "Do Not Disturb on", dndOn, if (dndOn) "on" else "calls and notifications may interrupt"),
     CheckItem(CheckId.BATTERY, "Battery above 50%", batteryPct > 50, "$batteryPct%"),
     CheckItem(CheckId.WIFI, "Connected to Wi-Fi", onWifi, if (onWifi) "yes" else "not on Wi-Fi"),
@@ -44,5 +50,9 @@ fun checkPreflight(context: Context): List<CheckItem> {
     val cm = context.getSystemService(ConnectivityManager::class.java)
     val wifi = cm.getNetworkCapabilities(cm.activeNetwork)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
     val pm = context.getSystemService(PowerManager::class.java)
-    return evaluatePreflight(mic, dnd, pct, wifi, pm.isIgnoringBatteryOptimizations(context.packageName))
+    // From SDK 37, UDP to LAN addresses fails with EPERM unless this runtime permission is granted.
+    val localNet = Build.VERSION.SDK_INT < 37 || ContextCompat.checkSelfPermission(
+        context, "android.permission.ACCESS_LOCAL_NETWORK",
+    ) == PackageManager.PERMISSION_GRANTED
+    return evaluatePreflight(mic, dnd, pct, wifi, pm.isIgnoringBatteryOptimizations(context.packageName), localNet)
 }

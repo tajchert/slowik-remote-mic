@@ -113,6 +113,12 @@ class MainActivity : ComponentActivity() {
     private fun fix(id: CheckId) {
         when (id) {
             CheckId.MIC -> requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 1)
+            // Once denied twice Android stops showing the prompt, so send the user to app settings instead.
+            CheckId.LOCAL_NETWORK -> if (shouldShowRequestPermissionRationale("android.permission.ACCESS_LOCAL_NETWORK")) {
+                requestPermissions(arrayOf("android.permission.ACCESS_LOCAL_NETWORK"), 2)
+            } else {
+                startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+            }
             CheckId.DND -> startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS))
             CheckId.BATTERY_OPT -> startActivity(
                 Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")),

@@ -35,10 +35,11 @@ class StateTest {
     }
 
     @Test fun preflightFlagsProblems() {
-        val ok = evaluatePreflight(true, true, 80, true, true)
+        val ok = evaluatePreflight(true, true, 80, true, true, true)
         assert(ok.all { it.ok })
-        val bad = evaluatePreflight(false, false, 40, false, false)
+        val bad = evaluatePreflight(false, false, 40, false, false, false)
         assert(bad.none { it.ok })
         assertEquals(false, bad.first { it.id == CheckId.BATTERY }.ok)
+        assertEquals(false, bad.first { it.id == CheckId.LOCAL_NETWORK }.ok)
     }
 }
