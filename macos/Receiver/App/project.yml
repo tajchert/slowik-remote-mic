@@ -1,0 +1,47 @@
+# XcodeGen spec for the menu-bar app. Generate with: cd macos/Receiver/App && xcodegen generate
+# The .xcodeproj is gitignored; this file is the source of truth.
+name: SlowikReceiverApp
+options:
+  bundleIdPrefix: pl.tajchert.slowik
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+packages:
+  SlowikReceiver:
+    path: ..
+targets:
+  SlowikReceiver:
+    type: application
+    platform: macOS
+    sources: [Sources]
+    dependencies:
+      - package: SlowikReceiver
+        product: SlowikCore
+      - package: SlowikReceiver
+        product: SlowikEngine
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: Slowik Receiver
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        LSUIElement: true
+        LSApplicationCategoryType: public.app-category.utilities
+        NSLocalNetworkUsageDescription: Slowik receives audio from your phone over the local network and advertises itself so the phone can find this Mac.
+        NSBonjourServices: [_slowik._udp]
+        NSHumanReadableCopyright: MIT licence
+    settings:
+      base:
+        PRODUCT_NAME: Slowik Receiver
+        PRODUCT_BUNDLE_IDENTIFIER: pl.tajchert.slowik.receiver
+        MARKETING_VERSION: 0.1.0
+        CURRENT_PROJECT_VERSION: 1
+        SWIFT_VERSION: "5.0"
+        # Local / open-source builds: ad-hoc "Sign to Run Locally", no team, not sandboxed (see README).
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual
+        DEVELOPMENT_TEAM: ""
+        ENABLE_HARDENED_RUNTIME: NO
+        ENABLE_APP_SANDBOX: NO
+        GENERATE_INFOPLIST_FILE: NO
+        ENABLE_USER_SCRIPT_SANDBOXING: YES

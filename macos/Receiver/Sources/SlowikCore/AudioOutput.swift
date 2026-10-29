@@ -53,25 +53,44 @@ public final class AudioOutput {
     private let meterLock = NSLock()
     private var postPeakValue: Float = 0
     private var tapHandler: ((AVAudioPCMBuffer) -> Void)?
+    /// While no device plays, a host-clock renderer keeps pulling the engine (discarding audio) so link state,
+    /// stats and meters stay live. Exactly one of {AVAudioEngine, idle clock} consumes the engine at a time.
+    private let idleRender: Bool
+    private var idleClock: ClockRenderer?
 
     /// Optional post-DSP sink (e.g. WAV writer in the CLI). Called on the tap thread, not the render thread.
-    public init(engine slowik: OpaquePointer, postTap: ((AVAudioPCMBuffer) -> Void)? = nil) {
+    public init(engine slowik: OpaquePointer, idleRender: Bool = false, postTap: ((AVAudioPCMBuffer) -> Void)? = nil) {
         self.slowik = slowik
+        self.idleRender = idleRender
         self.tapHandler = postTap
         trim.globalGain = trimDb
-        for (i, band) in highPass.bands.enumerated() {
+        for band in highPass.bands {
             // Two cascaded 12 dB/oct high-pass sections = 24 dB/oct at ~90 Hz.
             band.filterType = .highPass
             band.frequency = 90
             band.bandwidth = 0.5
             band.bypass = false
-            _ = i
         }
         configureDynamics()
         deviceToken = AudioDevices.observeChanges { [weak self] in self?.devicesChanged() }
     }
 
-    deinit { stop() }
+    deinit {
+        teardown()
+        stopIdle()
+    }
+
+    private func startIdle() {
+        guard idleRender, idleClock == nil else { return }
+        let c = ClockRenderer(engine: slowik)
+        c.start { _ in }
+        idleClock = c
+    }
+
+    private func stopIdle() {
+        idleClock?.stop()
+        idleClock = nil
+    }
 
     public var postPeak: Float { meterLock.withLock { postPeakValue } }
 
@@ -118,6 +137,7 @@ public final class AudioOutput {
         guard let device = dev else {
             return setStatus(target == .slowikMic ? .driverMissing : .failed("no output device"))
         }
+        stopIdle()
         engine = AVAudioEngine()
         // The render block is the real-time path: one C call + a memcpy for the second channel.
         let slowik = self.slowik
@@ -205,6 +225,7 @@ public final class AudioOutput {
 
     @discardableResult
     private func setStatus(_ s: OutputStatus) -> OutputStatus {
+        if case .running = s {} else { startIdle() }
         status = s
         onStatusChange?(s)
         return s
