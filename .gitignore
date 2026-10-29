@@ -1,0 +1,33 @@
+# macOS / editors
+.DS_Store
+*.swp
+.idea/
+.vscode/
+.claude/settings.local.json
+
+# Android / Gradle
+.gradle/
+.kotlin/
+build/
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.jks
+*.keystore
+*.iml
+
+# Xcode / SwiftPM / CMake
+*.xcodeproj/
+xcuserdata/
+DerivedData/
+.build/
+.swiftpm/
+macos/**/build*/
+*.driver/
+
+# Python
+__pycache__/
+*.pyc
