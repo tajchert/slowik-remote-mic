@@ -23,10 +23,10 @@ constexpr int kRingFrames = 128;  // 640 ms of storage
 constexpr int kQueueCap = 128;    // 640 ms of packets
 constexpr int kMaxStreams = 4;
 constexpr int kJitBucket = 200;      // first-arrival transit samples per jitter bucket (~1 s)
-constexpr int kJitBuckets = 10;      // buckets kept (~10 s); the worst 2 are ignored (single bursts/stalls)
+constexpr int kJitBuckets = 10;      // buckets kept (~10 s); the worst one is ignored (single burst/stall)
 constexpr int64_t kJitSkipAfterSync = kRate;  // ignore arrivals in the first 1 s after (re)sync (start burst)
-constexpr double kDropExcessMs = 30;  // head-drop when fill stays > target + this ...
-constexpr double kDropHoldMs = 300;   // ... for this long
+constexpr double kDropExcessMs = 10;  // head-drop when fill stays > target + this ...
+constexpr double kDropHoldMs = 500;   // ... for this long
 constexpr int kXfade = 96;           // 2 ms crossfade concealment -> real audio
 constexpr double kConcealTau = 0.015;
 constexpr int64_t kRestartBackSamples = 9600;  // sample_index jumps back > 200 ms => sender restart
@@ -258,6 +258,7 @@ private:
         rs_.reset();
         fill_s_ = target_;
         bk_n_ = bres_count_ = bres_pos_ = 0;
+        dcount_ = dpos_ = 0;  // sender restart changes the transit offset; keep the last estimate meanwhile
         since_sync_ = 0;
         over_ = 0;
         drop_req_ = 0;
@@ -296,7 +297,7 @@ private:
         bk_[bk_n_++] = transit;
         if (bk_n_ == kJitBucket) {
             bk_n_ = 0;
-            int k50 = kJitBucket / 2, k99 = int(0.995 * (kJitBucket - 1));  // 2nd-largest of 200
+            int k50 = kJitBucket / 2, k99 = kJitBucket - 1;  // max of the bucket (any late frame counts)
             double mn = *std::min_element(bk_, bk_ + kJitBucket);
             std::nth_element(bk_, bk_ + k99, bk_ + kJitBucket);
             double p99 = bk_[k99];
@@ -306,6 +307,23 @@ private:
             bres_m_[bres_pos_] = (p50 - mn) / 1000.0;
             bres_pos_ = (bres_pos_ + 1) % kJitBuckets;
             if (bres_count_ < kJitBuckets) ++bres_count_;
+            dmin_[dpos_] = mn;
+            dtime_[dpos_] = double(arrival_us);
+            dpos_ = (dpos_ + 1) % kDriftPts;
+            if (dcount_ < kDriftPts) ++dcount_;
+            if (dcount_ >= 5) {
+                double mt = 0, mm = 0;
+                for (int i = 0; i < dcount_; ++i) { mt += dtime_[i]; mm += dmin_[i]; }
+                mt /= dcount_;
+                mm /= dcount_;
+                double num = 0, den = 0;
+                for (int i = 0; i < dcount_; ++i) {
+                    num += (dtime_[i] - mt) * (dmin_[i] - mm);
+                    den += (dtime_[i] - mt) * (dtime_[i] - mt);
+                }
+                // transit grows when the phone's sample clock is slower than ours: drift = -slope.
+                if (den > 0) drift_s_ = -num / den;
+            }
         }
     }
 
@@ -365,13 +383,14 @@ private:
     }
 
     float next_input() {
-        if (drop_req_ > 0 && mode_ == kGood && !concealing_ && xfade_left_ == 0) {
-            // Head-drop excess latency: skip whole frames and crossfade (mirror continuation -> new audio).
+        if (drop_req_ > 0 && mode_ != kStall && xfade_left_ == 0) {
+            // Head-drop excess latency: skip whole frames. While playing, crossfade from the mirror continuation
+            // of the last 5 ms into the new position; while concealing, the next good frame crossfades anyway.
             rd_ += drop_req_ * kFrame;
             fill_s_ -= double(drop_req_ * kFrame);
             dropped_ += uint64_t(drop_req_);
             drop_req_ = 0;
-            xfade_left_ = kXfade;  // concealing_ is false, so conceal_next() snapshots the last 5 ms played
+            if (!concealing_) xfade_left_ = kXfade;  // conceal_next() snapshots the last 5 ms played
         }
         int64_t f = floor_div(rd_ - align_, kFrame);
         if (f != cur_f_) enter_frame(f);
@@ -457,26 +476,24 @@ private:
         if (std::fabs(e) < 0.002 && !sat) integ_ = std::clamp(integ_ + cfg_.ki * e * dt, -maxr, maxr);
         double r = std::clamp(kp * e + integ_ + ff_, -lim, lim);
         ratio_ = 1.0 + r;
-        // Reported drift: smoothed ratio minus the deliberate target-shrink feed-forward (not during catch-up,
-        // where the ratio is dominated by the deliberate fill correction).
-        // Held during large-error transients (target steps, post-stall) so they do not read as drift.
-        if (!catchup && std::fabs(e) < 0.002)
-            drift_s_ += ((r - ff_) - drift_s_) * std::min(1.0, dt / 3.0);
     }
 
     void update_target() {
         if (bres_count_ == 0) return;
-        // Robust jitter: 3rd-worst of the last ~10 one-second buckets (p99 - p50 each), so one burst or stall
-        // (which spans at most two buckets) does not set the target; persistent jitter does.
+        // Robust jitter: 2nd-worst of the last ~10 one-second buckets (max - p50 each), so one burst or stall
+        // (a flush lands in one bucket) does not set the target; jitter seen in two seconds of ten does.
         double v[kJitBuckets], m[kJitBuckets];
         int n = bres_count_;
         std::memcpy(v, bres_p_, sizeof(double) * size_t(n));
         std::memcpy(m, bres_m_, sizeof(double) * size_t(n));
         std::sort(v, v + n, [](double x, double y) { return x > y; });
         std::sort(m, m + n);
-        jitter_ms_ = v[std::min(2, n - 1)];
+        jitter_ms_ = v[std::min(1, n - 1)];
         jitter_mean_ms_ = m[n / 2];
-        double block_ms = 1000.0 * block_ / kRate;
+        // Fill is measured right after a render call has consumed its block, so the block size itself cancels
+        // out of the requirement; only drain granularity matters. Cap its contribution at 128 frames' worth so
+        // 512/1024-frame callbacks don't inflate the target (they used to add 2 x 21 ms).
+        double block_ms = 1000.0 * std::min(block_, 128) / kRate;
         // half a packet of sawtooth + one block of drain granularity + one block of render-ahead + resampler
         double raw_ms = jitter_ms_ + 2.5 + 2 * block_ms + 8.0 * 1000.0 / kRate + cfg_.margin_ms;
         raw_ms = std::clamp(raw_ms, cfg_.min_target_ms, cfg_.max_target_ms);
@@ -584,6 +601,11 @@ private:
     int64_t since_sync_ = 0, over_ = 0, drop_req_ = 0;
     double over_min_ = 0;
     bool reanchor_ = false;
+    // Drift: least-squares slope of the per-second MINIMUM transit (lower envelope of arrival time vs sender
+    // sample clock) over the last 30 s. The envelope is ~0.1-1 ms clean even with 10+ ms jitter, unlike the fill.
+    static constexpr int kDriftPts = 30;
+    double dmin_[kDriftPts] = {}, dtime_[kDriftPts] = {};
+    int dcount_ = 0, dpos_ = 0;
     uint64_t max_capture_ = 0;
     uint64_t dropped_ = 0;
     struct SeqSeen {
@@ -612,6 +634,9 @@ struct Stream {
     int64_t ext_highest = 0;   // extended (unwrapped) highest seq relative to base
     uint64_t since_base = 0;   // packets received since base
     uint64_t lost_run = 0, lost_total_prev = 0;
+    bool have_sender = false;
+    uint64_t sender_key = 0, sender_last_us = 0;
+    std::atomic<uint64_t> foreign{0};
     // network -> anyone
     std::atomic<int> id{-1};
     std::atomic<uint64_t> received{0}, invalid{0}, dropped{0}, lost_seq{0};
@@ -662,6 +687,11 @@ extern "C" SlowikEngine* slowik_engine_create(const SlowikConfig* cfg) {
 extern "C" void slowik_engine_destroy(SlowikEngine* e) { delete e; }
 
 extern "C" int slowik_engine_push_packet(SlowikEngine* e, const uint8_t* data, size_t len, uint64_t arrival_us) {
+    return slowik_engine_push_packet_from(e, data, len, arrival_us, 0);
+}
+
+extern "C" int slowik_engine_push_packet_from(SlowikEngine* e, const uint8_t* data, size_t len, uint64_t arrival_us,
+                                              uint64_t source_key) {
     SlowikAudioHeader h;
     int r = slowik_parse_audio(data, len, &h);
     if (r != SLOWIK_PARSE_OK) {
@@ -681,6 +711,14 @@ extern "C" int slowik_engine_push_packet(SlowikEngine* e, const uint8_t* data, s
         s->id.store(h.stream_id, std::memory_order_relaxed);
         e->stream_count.store(n + 1, std::memory_order_release);
     }
+    // Sender lock: one source address per stream; switch only after the locked one is silent for > 2 s.
+    if (s->have_sender && source_key != s->sender_key && arrival_us < s->sender_last_us + 2000000) {
+        s->foreign.fetch_add(1, std::memory_order_relaxed);
+        return SLOWIK_PUSH_FOREIGN_SENDER;
+    }
+    s->have_sender = true;
+    s->sender_key = source_key;
+    s->sender_last_us = arrival_us;
     s->received.fetch_add(1, std::memory_order_relaxed);
     // RTP-style loss: expected (highest - base + 1) minus received; reordering is not loss.
     int32_t d = int32_t(h.seq - s->last_seq);  // wrap-safe
@@ -771,6 +809,7 @@ extern "C" void slowik_engine_get_stats(SlowikEngine* e, SlowikStats* o) {
         o->packets_received = s.received.load(R);
         o->packets_dropped_queue = s.dropped.load(R);
         o->packets_lost_seq = s.lost_seq.load(R);
+        o->packets_foreign = s.foreign.load(R);
         o->battery = s.battery.load(R);
         o->rssi = s.rssi.load(R);
         o->flags = s.flags.load(R);

@@ -33,7 +33,10 @@ typedef struct {
     double burst_start_ms;
     // stall + flush: packets sent in [stall_at, stall_at+stall_len) are delivered at once at the end
     double stall_at_s, stall_len_s;
-    double settle_s;         // fill_err/fill_min/max are measured from warmup_s + settle_s (default 10)
+    double settle_s;
+    double render_start_ms;    // device starts pulling this long after the sim starts (packets pile up)
+    double arrival_quantum_ms; // deliver packets only at multiples of this (Wi-Fi power-save batching)
+    double second_sender_offset_ms;  // >0: a 2nd sender (other address, same stream_id) lagging by this much         // fill_err/fill_min/max are measured from warmup_s + settle_s (default 10)
     double warmup_s;         // stats below exclude the first warmup_s seconds
     const char* wav_path;    // optional: write rendered output (mono float->PCM16)
 } SlowikSimConfig;

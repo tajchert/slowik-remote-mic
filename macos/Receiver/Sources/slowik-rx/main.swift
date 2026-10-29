@@ -95,9 +95,9 @@ func printStats() {
     let s = service.stats()
     let t = Date().timeIntervalSince(t0)
     let batt = s.battery >= 0 ? "\(s.battery)%" : "?"
-    print(String(format: "t=%3.0fs %@ pkts=%llu lostSeq=%llu loss=%.1f‰ concealed=%llu late=%llu dup=%llu underruns=%llu resyncs=%llu jit=%.1fms target=%.1fms fill=%.1fms drift=%+.0fppm ratio=%+.0fppm lat=%.0fms level=%.0fdBFS batt=%@ rssi=%d",
-                 t, s.linkText, s.packets_received, s.packets_lost_seq, s.loss_permille, s.frames_concealed,
-                 s.frames_late, s.frames_duplicate, s.underruns, s.resyncs, s.jitter_ms, s.target_ms, s.fill_ms,
+    print(String(format: "t=%3.0fs %@ pkts=%llu lostSeq=%llu foreign=%llu loss=%.1f‰ concealed=%llu late=%llu dup=%llu underruns=%llu dropped=%llu blk=%d resyncs=%llu jit=%.1fms target=%.1fms fill=%.1fms drift=%+.0fppm ratio=%+.0fppm lat=%.0fms level=%.0fdBFS batt=%@ rssi=%d",
+                 t, s.linkText, s.packets_received, s.packets_lost_seq, s.packets_foreign, s.loss_permille, s.frames_concealed,
+                 s.frames_late, s.frames_duplicate, s.underruns, s.frames_dropped, s.render_block, s.resyncs, s.jitter_ms, s.target_ms, s.fill_ms,
                  s.drift_ppm, s.ratio_ppm, s.latency_ms, dbfs(s.peak), batt, s.rssi)
           + (output.map { " out=\($0.status.text) post=\(Int(dbfs($0.postPeak)))dBFS" } ?? ""))
 }

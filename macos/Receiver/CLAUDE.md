@@ -44,13 +44,18 @@ and plays into the "Slowik Mic" virtual device (UID `SlowikMic_UID`, built in `m
 - No new frame for 150 ms → LINK_LOST, 5 ms fade to silence; next packet → resync. Resync also on sample_index
   jumping back > 200 ms while capture_time moves forward (sender restart), misalignment, or data beyond ring capacity.
   After a resync the read position is re-anchored on the newest data in the queue (start-up bursts).
-- Bursts (Wi-Fi power-save wake-up, stall then flush): if fill stays > target + 30 ms for 300 ms, whole frames are
-  dropped from the head with a 2 ms crossfade (`frames_dropped`). The PI resampler only does small, slow corrections.
-- Target = jitter + 2.5 ms + 2·block + resampler + 3 ms margin, clamped 10–80 ms. Jitter = 3rd-worst of the last ten
-  1-s buckets of (p99.5 − p50) first-arrival transit; arrivals in the first 1 s after a resync are ignored. Grows instantly; shrinks (peak-hold 10 s, 2 ms hysteresis) by playing 100 ppm fast (250 ppm below −40 dBFS).
+- Bursts (Wi-Fi power-save wake-up, stall then flush): if fill stays > target + 10 ms for 500 ms (minimum over the
+  window), whole frames are dropped from the head with a crossfade (`frames_dropped`). The PI resampler only does
+  small, slow corrections.
+- Target = jitter + 2.5 ms + 2·min(block, 128 frames) + resampler + 3 ms margin, clamped 10–80 ms. Jitter = 2nd-worst
+  of the last ten 1-s buckets of (max − p50) first-arrival transit; the first 1 s after a resync is ignored.
+- Sender lock: `push_packet_from(..., source_key)` (UDPReceiver passes ip:port). A stream accepts one sender; others
+  are counted in `packets_foreign` until the locked sender has been silent for > 2 s. Grows instantly; shrinks (peak-hold 10 s, 2 ms hysteresis) by playing 100 ppm fast (250 ppm below −40 dBFS).
 - Resampler: 16-tap Kaiser windowed sinc, 256 phases (linear interp). Ratio = 1 + PI(fill − target), ±200 ppm
   steady; 10 s catch-up after resync (5× Kp, ±2000 ppm). Integrator gated (|e| < 2 ms, anti-windup).
-- Drift sign: `drift_ppm > 0` = phone clock faster than output clock. `slowik_sim.py --ppm 150` (slower sender) → ≈ −150.
+- Drift readout = least-squares slope of the per-second minimum transit over 30 s (phone clock vs Mac host clock;
+  needs ≥ 5 s after sync). It is display-only; the PI loop does the compensation.
+- Drift sign: `drift_ppm > 0` = phone clock faster than the Mac clock. `slowik_sim.py --ppm 150` (slower sender) → ≈ −150.
 
 ## Conventions
 - Repo is public: no team IDs, certificates, local paths. Ad-hoc signing (`CODE_SIGN_IDENTITY: "-"`).
